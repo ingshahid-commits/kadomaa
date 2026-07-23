@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  KADOMA — ONBOARDING WIZARD — STAGE 1 OF 3 (DONE)
+  ============================================================================
+  If you are the AI picking up Stage 2 or Stage 3, read this whole comment
+  before touching anything. Do not redesign what's already here — extend it
+  so the whole app reads as if one designer/engineer built all three stages.
+
+  WHAT STAGE 1 DELIVERS (this file, self-contained, no build step, no deps
+  besides the Vazirmatn webfont CDN link — works as-is on GitHub Pages):
+    - Full onboarding conversation: welcome -> name -> grade (10/11/12) ->
+      track (experimental active; math/humanities disabled "به‌زودی") ->
+      daily study-hours range -> goal (custom active; mock-exam/finals
+      disabled "به‌زودی") -> for each subject in [biology, chemistry,
+      physics]: an intro line, a chapter checklist (grouped by grade
+      10/11/12, real chapter titles/counts taken directly from the engine's
+      kie/data/*.js files), then a circular drag-knob mastery rating (1-10,
+      blue->green gradient) for every chapter the user checked -> a final
+      "برنامه‌ات داره آماده می‌شه" loading screen (Stage 1 intentionally
+      ends here).
+    - All user input lives in one plain JS object, `state` (see the <script>
+      block): { name, grade, track, from, to, goal, subjects: { biology:
+      {chapters:{ "10-0":bool,... }, mastery:{ "10-0":1..10,... }},
+      chemistry:{...}, physics:{...} } }. Keys are "<grade>-<chapterIndex>".
+    - CHAPTERS object near the top of the <script> is a STATIC SNAPSHOT of
+      the real chapter titles (copied verbatim from kie/data/biology10-12.js,
+      chemistry10-12.js, physics10-12.js at the time this was built: bio
+      7/9/9, chem 3/3/4, physics 4/3/4). If the engine's data files change,
+      re-sync this object — or better, in Stage 2, delete this hardcoded
+      object and pull chapter lists live from the actual engine.
+
+  WHAT STAGE 2 MUST DO ("این انجین باید مغز و پشت این HTML باشه"):
+    - Wire the real Kadoma Intelligence Engine (kie/kadomaEngine.js +
+      kie/extensions/*) in as the actual brain. On reaching the final
+      loading screen, take the collected `state` and:
+        1. attachLivingPlan + attachStage2 + attachStage3 (or however the
+           current zip's extension API is shaped — check kie/extensions/
+           STAGE_HANDOFF.md first, it documents the real current API).
+        2. Ingest the user's selected chapters + mastery ratings into
+           ChapterMastery/CurriculumEngine (map state.subjects[x].mastery
+           1-10 values directly into ChapterMastery.setScore).
+        3. Actually GENERATE a first real daily plan (this is the #1 gap
+           flagged in REVIEW_STUDY_PLAN_QUALITY.md in this same zip — there
+           is currently NO orchestrator function that turns prioritized
+           chapters + capacity + energy into real Commitments; Stage 2
+           should be the one that finally writes it).
+        4. Replace/extend the loading screen with a results view showing
+           the generated plan (or transitions into a dashboard - Stage 3's
+           call to make, but Stage 2 should at least produce the data).
+    - Read REVIEW_STUDY_PLAN_QUALITY.md (also in this zip) first — it's a
+      full audit of exactly what's missing in the engine and why. Stage 2's
+      job is largely to close those specific gaps, not invent new ones.
+
+  DESIGN SYSTEM — KEEP IDENTICAL IN STAGE 2/3 (so it reads as one product):
+    - Palette (CSS custom properties at the top of <style>): dark navy/charcoal
+      background (--bg:#11141c), warm orange accent (--accent:#ff8a34,
+      --accent-2:#ffb066) — this orange is Kadoma's established brand color
+      from earlier work on this app, not a new choice; keep it.
+    - Font: Vazirmatn everywhere, loaded via the same jsdelivr webfont CSS
+      link already in <head>.
+    - Shape language: pill buttons (border-radius:99px) for primary CTAs,
+      16-26px rounded rectangles (--radius-md/--radius-lg) for cards,
+      1.5px hairline borders using --border, never heavier.
+    - Icons: hand-drawn-feeling line SVGs only (stroke-based, no fill,
+      currentColor), NEVER emoji — this was an explicit, repeated
+      instruction from the human. If a new icon is needed, draw it in the
+      same minimal stroke style as the ICONS object in the <script>.
+    - Motion: steps fade+slide in with `stepIn`/`stepOut` keyframes and the
+      shared --ease cubic-bezier(.22,1,.36,1) — reuse this exact easing for
+      any new transitions so motion feels consistent, not two different apps.
+    - RTL correctness: forward/"next" chevrons point LEFT (not right) because
+      forward progress moves right-to-left in this RTL layout — checked and
+      fixed already; keep this convention for any new directional icon.
+    - The circular mastery knob (SVG progress ring + draggable handle +
+      blue->green gradient by value) is the one signature/memorable UI
+      element of Stage 1 — if Stage 3 needs a similar "rate this" control
+      anywhere (e.g. a Daily Review energy/difficulty input), reuse this
+      exact knob component rather than inventing a slider.
+
+  Tested: full click-through of every step + simulated pointer-drag on the
+  mastery knob, in a real headless Chromium run, zero console/page errors
+  (aside from an expected 403 on the font CDN inside this sandboxed dev
+  environment only — will resolve normally on GitHub Pages/any real host).
+  ============================================================================
+-->
+<!--
+  ============================================================================
+  KADOMA — ONBOARDING WIZARD — STAGE 2 OF 3 (DONE)
+  ============================================================================
+  Stage 1 built the onboarding UI. Stage 2 (this update) wired the REAL
+  engine in as the brain. If you're picking up Stage 3, read this fully.
+
+  WHAT STAGE 2 DID:
+    - Added a `<script type="module">` block (bottom of </body>) that
+      imports the real kie/kadomaEngine.js + kie/extensions/* + kie/data/*
+      (all shipped alongside this file under ./kie/ — nothing bundled,
+      plain ES modules, GitHub Pages serves these as static files fine).
+    - On reaching the "loading" step, `generatePlan(state)` now:
+        1. Builds a fresh KadomaIntelligenceEngine + LivingPlan (mission =
+           grade + track from onboarding).
+        2. attachStage2 / attachStage3 / attachKnowledgeBase (ingests all
+           46 real chapters across bio/chem/physics × 10/11/12).
+        3. Sets EVERY ingested chapter's ChapterMastery score to 10
+           ("already known") as a default, then overwrites ONLY the
+           chapters the user actually checked with their real 1-10 rating
+           from the mastery knob. This is how chapter selection is scoped
+           to the user's picks WITHOUT touching CurriculumEngine.js or
+           ChapterMastery.js — a deliberate, minimal-footprint choice
+           (see the code comment right above the `.forEach` that does it).
+        4. attachStage4 (the existing PlannerGenerator/DaySessionScheduler
+           orchestrator — it already existed in kie/extensions/stage4/,
+           Stage 2 did NOT need to invent a scheduler from scratch, just
+           wire it) → `generateDailyPlan(signals, opts)` → `commitDailyPlan()`.
+        5. freeTimeMinutes is computed directly from the onboarding's
+           from/to time fields.
+    - Added a new "result" step after "loading" that renders the REAL
+      committed Commitments (subject, chapter+step title, planned minutes,
+      energy-window tag) — this is the actual payoff screen, not a mock.
+    - Fixed one RTL detail: forward chevrons point left (kept from Stage 1).
+
+  TESTED: Full click-through in a real headless Chromium session served
+  over http:// (module scripts need a real origin, not file://) — zero
+  console/page errors, verified real chapter titles/subjects/minutes came
+  back correctly for a 3-subject, multi-grade selection.
+
+  KNOWN, INTENTIONAL SIMPLIFICATIONS (fair game for Stage 3 to improve):
+    - `signals` passed to computeTodayCapacity uses neutral defaults for
+      energy/stress/sleepHours/completionRate (no history exists yet for
+      a brand-new user) — Stage 3, once real Daily Reviews start coming
+      in, should read real values instead of these onboarding-time defaults.
+    - Only TODAY's plan is generated/shown. `stage4.generateWeeklyStrategy`
+      and the multi-day Roadmap view are NOT built yet — natural Stage 3 work.
+    - The "quick_review"/step-label logic (e.g. "مرور سریع") comes entirely
+      from the existing, already-tested `getNextStepForChapter` in
+      kie/extensions/stage4/PlannerGenerator.js — Stage 2 did not touch or
+      second-guess that logic, just displays whatever it returns.
+    - No persistence: reloading the page starts a brand-new engine/plan.
+      Stage 3 should decide on a storage strategy (localStorage snapshot
+      via LivingPlan.snapshot()/fromSnapshot(), or a real backend).
+
+  STAGE 3 SHOULD BUILD (in the same visual language — see the DESIGN
+  SYSTEM notes below, unchanged from Stage 1):
+    - A persistent dashboard/home screen (today's Commitments with a real
+      Pomodoro-style start/complete flow calling
+      `stage4Api.recordStepCompleted(chapterId, stepKey)`).
+    - Weekly Roadmap view using `stage4Api.generateWeeklyStrategy(...)`.
+    - Wire `attachStage2`'s DailyReview/ProgressiveProfiling/NegotiationEngine
+      into actual nightly check-in UI + the negotiation counter-offer flow
+      (draft.negotiationProposal is already surfaced in the result screen's
+      data but only shown as a passive note right now — Stage 3 should make
+      it interactive, matching the brief's "۴ ساعت نمی‌رسم -> ۳ ساعت چطور؟").
+    - Persistence (localStorage at minimum) so returning users don't restart
+      onboarding every time.
+
+  DESIGN SYSTEM — UNCHANGED FROM STAGE 1, KEEP IDENTICAL:
+    - Palette: --bg:#11141c, --accent:#ff8a34, --accent-2:#ffb066 (Kadoma's
+      established warm-orange-on-navy brand identity).
+    - Font: Vazirmatn (same jsdelivr link in <head>).
+    - Shape language: pill buttons, 16-26px rounded cards, 1.5px borders.
+    - Icons: stroke-only line SVGs, NEVER emoji.
+    - Motion: shared --ease cubic-bezier(.22,1,.36,1), same stepIn/stepOut
+      keyframe pattern for any new screen transitions.
+    - RTL: forward/"next" chevrons point left.
+    - The circular drag-knob (mastery rating) is Kadoma's one signature
+      control — reuse it verbatim for any future 1-10 rating input
+      (e.g. Daily Review's energy/difficulty), don't invent a new slider.
+  ============================================================================
+-->
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>کادوما — بیا اولین برنامه‌ت رو بسازیم</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
+<style>
+  :root{
+    --bg:#11141c;
+    --bg-soft:#161a24;
+    --surface:#1c2130;
+    --surface-2:#252b3d;
+    --surface-3:#2f3650;
+    --border:rgba(255,255,255,.07);
+    --text:#eef0f5;
+    --text-dim:#9aa2b8;
+    --text-faint:#6b7286;
+    --accent:#ff8a34;
+    --accent-2:#ffb066;
+    --accent-soft:rgba(255,138,52,.14);
+    --blue:#3b82f6;
+    --green:#22c55e;
+    --radius-lg:26px;
+    --radius-md:16px;
+    --radius-sm:10px;
+    --ease:cubic-bezier(.22,1,.36,1);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    font-family:'Vazirmatn', system-ui, sans-serif;
+    background:
+      radial-gradient(1100px 700px at 20% -10%, rgba(255,138,52,.08), transparent 60%),
+      radial-gradient(900px 600px at 110% 10%, rgba(59,130,246,.06), transparent 55%),
+      var(--bg);
+    color:var(--text);
+    min-height:100vh;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font-family:inherit;}
+  input{font-family:inherit;}
+
+  /* ---------- shell ---------- */
+  .shell{
+    max-width:560px;
+    margin:0 auto;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    padding:22px 20px 28px;
+    position:relative;
+  }
+  .brandbar{
+    display:flex; align-items:center; gap:10px;
+    padding:4px 2px 22px;
+    flex-shrink:0;
+  }
+  .brand-mark{
+    width:34px; height:34px; border-radius:11px;
+    background:linear-gradient(155deg, var(--accent), #c85e12);
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 6px 18px -6px rgba(255,138,52,.55);
+    flex-shrink:0;
+  }
+  .brand-mark svg{width:18px; height:18px;}
+  .brand-name{font-weight:700; font-size:15px; letter-spacing:.2px;}
+
+  .progress-track{
+    height:4px; border-radius:99px; background:var(--surface-2);
+    overflow:hidden; flex-shrink:0; margin-bottom:8px;
+  }
+  .progress-fill{
+    height:100%; border-radius:99px;
+    background:linear-gradient(90deg, var(--accent), var(--accent-2));
+    width:0%;
+    transition:width .5s var(--ease);
+  }
+  .progress-caption{
+    font-size:11.5px; color:var(--text-faint); margin-bottom:18px; flex-shrink:0;
+    min-height:15px;
+  }
+
+  .stage-wrap{
+    flex:1;
+    position:relative;
+    display:flex;
+    flex-direction:column;
+  }
+  .step{
+    display:flex; flex-direction:column;
+    animation:stepIn .48s var(--ease);
+    flex:1;
+  }
+  .step.leaving{ animation:stepOut .28s var(--ease) forwards; }
+  @keyframes stepIn{
+    from{ opacity:0; transform:translateY(14px) scale(.99); }
+    to{ opacity:1; transform:translateY(0) scale(1); }
+  }
+  @keyframes stepOut{
+    to{ opacity:0; transform:translateY(-10px) scale(.99); }
+  }
+
+  /* ---------- typography ---------- */
+  .eyebrow{
+    font-size:12.5px; color:var(--accent-2); font-weight:600;
+    display:flex; align-items:center; gap:7px; margin-bottom:10px;
+  }
+  .eyebrow .dot{width:6px; height:6px; border-radius:99px; background:var(--accent);}
+  h1{
+    font-size:26px; line-height:1.5; font-weight:800; margin:0 0 10px;
+    letter-spacing:-.2px;
+  }
+  h1 .hi{color:var(--accent-2);}
+  p.lede{
+    font-size:14.5px; line-height:1.9; color:var(--text-dim); margin:0 0 26px;
+    max-width:46ch;
+  }
+
+  /* ---------- kadoma avatar / talking bubble ---------- */
+  .kadoma-face{
+    width:64px; height:64px; border-radius:20px;
+    background:linear-gradient(160deg, var(--surface-3), var(--surface));
+    border:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center;
+    margin-bottom:20px;
+    position:relative;
+    box-shadow:0 14px 32px -18px rgba(0,0,0,.6);
+  }
+  .kadoma-face svg{ width:30px; height:30px; }
+  .kadoma-face::after{
+    content:''; position:absolute; inset:-1px; border-radius:20px;
+    background:conic-gradient(from 0deg, var(--accent), transparent 30%);
+    opacity:0; z-index:-1; filter:blur(10px);
+    animation:facePulse 3.2s ease-in-out infinite;
+  }
+  @keyframes facePulse{ 0%,100%{opacity:0;} 50%{opacity:.5;} }
+
+  /* ---------- fields ---------- */
+  .field{ margin-bottom:20px; }
+  .field label{
+    display:block; font-size:12.5px; color:var(--text-faint); margin-bottom:8px; font-weight:600;
+  }
+  .text-input{
+    width:100%; padding:16px 18px; border-radius:var(--radius-md);
+    background:var(--surface); border:1.5px solid var(--border);
+    color:var(--text); font-size:16px; font-weight:600;
+    transition:border-color .2s, background .2s, transform .15s;
+    outline:none;
+  }
+  .text-input:focus{ border-color:var(--accent); background:var(--surface-2); }
+  .text-input::placeholder{ color:var(--text-faint); font-weight:400; }
+
+  .time-row{ display:flex; gap:12px; }
+  .time-field{ flex:1; }
+  .time-input{
+    width:100%; padding:14px 14px; border-radius:var(--radius-md);
+    background:var(--surface); border:1.5px solid var(--border);
+    color:var(--text); font-size:16px; font-weight:700; text-align:center;
+    outline:none; transition:border-color .2s;
+    color-scheme:dark;
+  }
+  .time-input:focus{ border-color:var(--accent); }
+
+  /* ---------- choice grids ---------- */
+  .choice-grid{ display:grid; gap:12px; }
+  .choice-grid.cols-3{ grid-template-columns:repeat(3,1fr); }
+  .choice-card{
+    position:relative;
+    padding:20px 14px; border-radius:var(--radius-md);
+    background:var(--surface); border:1.5px solid var(--border);
+    cursor:pointer; text-align:center;
+    transition:transform .18s var(--ease), border-color .18s, background .18s;
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+  }
+  .choice-card:active{ transform:scale(.97); }
+  .choice-card:hover{ border-color:rgba(255,138,52,.4); }
+  .choice-card.selected{
+    border-color:var(--accent);
+    background:linear-gradient(160deg, var(--accent-soft), var(--surface));
+  }
+  .choice-card .big{ font-size:22px; font-weight:800; }
+  .choice-card .small{ font-size:12px; color:var(--text-dim); }
+  .choice-card.disabled{
+    opacity:.4; cursor:not-allowed; filter:grayscale(.4);
+  }
+  .choice-card .badge{
+    position:absolute; top:-8px; left:50%; transform:translateX(-50%);
+    background:var(--surface-3); color:var(--text-faint);
+    font-size:9.5px; padding:3px 9px; border-radius:99px; font-weight:700;
+    border:1px solid var(--border); white-space:nowrap;
+  }
+  .check-dot{
+    position:absolute; top:10px; left:10px; width:18px; height:18px; border-radius:99px;
+    border:1.5px solid var(--border); background:var(--surface);
+    display:flex; align-items:center; justify-content:center;
+    transition:all .18s var(--ease);
+  }
+  .choice-card.selected .check-dot{ background:var(--accent); border-color:var(--accent); }
+  .check-dot svg{ width:10px; height:10px; opacity:0; transform:scale(.5); transition:all .15s; }
+  .choice-card.selected .check-dot svg{ opacity:1; transform:scale(1); }
+
+  .goal-stack{ display:flex; flex-direction:column; gap:12px; }
+  .goal-card{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 20px; border-radius:var(--radius-md);
+    background:var(--surface); border:1.5px solid var(--border);
+    cursor:pointer; transition:transform .18s var(--ease), border-color .18s;
+  }
+  .goal-card:not(.disabled):hover{ border-color:rgba(255,138,52,.4); }
+  .goal-card:not(.disabled):active{ transform:scale(.985); }
+  .goal-card.disabled{ opacity:.42; cursor:not-allowed; }
+  .goal-card .label{ font-size:15px; font-weight:700; }
+  .goal-card .soon{
+    font-size:11px; color:var(--text-faint); background:var(--surface-3);
+    padding:4px 10px; border-radius:99px; font-weight:700; flex-shrink:0;
+  }
+  .goal-card .arrow{ width:18px; height:18px; color:var(--text-faint); flex-shrink:0; }
+
+  /* ---------- chapter list ---------- */
+  .grade-block{ margin-bottom:22px; }
+  .grade-block-head{
+    display:flex; align-items:center; gap:10px; margin-bottom:12px;
+  }
+  .grade-pill{
+    font-size:11.5px; font-weight:800; padding:5px 12px; border-radius:99px;
+    background:var(--surface-3); color:var(--accent-2);
+  }
+  .grade-block-head .count{ font-size:12px; color:var(--text-faint); }
+  .chapter-list{ display:flex; flex-direction:column; gap:8px; }
+  .chapter-row{
+    display:flex; align-items:center; gap:12px;
+    padding:13px 16px; border-radius:var(--radius-sm);
+    background:var(--surface); border:1.5px solid var(--border);
+    cursor:pointer; transition:border-color .15s, background .15s;
+  }
+  .chapter-row:hover{ border-color:rgba(255,138,52,.35); }
+  .chapter-row.checked{ border-color:var(--accent); background:var(--surface-2); }
+  .chapter-box{
+    width:19px; height:19px; border-radius:6px; flex-shrink:0;
+    border:1.5px solid var(--border); background:var(--bg-soft);
+    display:flex; align-items:center; justify-content:center;
+    transition:all .15s var(--ease);
+  }
+  .chapter-row.checked .chapter-box{ background:var(--accent); border-color:var(--accent); }
+  .chapter-box svg{ width:11px; height:11px; opacity:0; transform:scale(.5); transition:all .15s; }
+  .chapter-row.checked .chapter-box svg{ opacity:1; transform:scale(1); }
+  .chapter-text{ font-size:13.5px; font-weight:600; line-height:1.6; }
+  .chapter-text .num{ color:var(--accent-2); font-weight:800; }
+
+  /* ---------- mastery slider ---------- */
+  .mastery-list{ display:flex; flex-direction:column; gap:22px; }
+  .mastery-row{
+    display:flex; align-items:center; gap:18px;
+    padding:16px; border-radius:var(--radius-md);
+    background:var(--surface); border:1.5px solid var(--border);
+  }
+  .mastery-info{ flex:1; min-width:0; }
+  .mastery-info .title{ font-size:13.5px; font-weight:700; line-height:1.6; margin-bottom:4px; }
+  .mastery-info .title .num{ color:var(--accent-2); }
+  .mastery-info .hint{ font-size:11.5px; color:var(--text-faint); }
+  .knob-wrap{ position:relative; width:78px; height:78px; flex-shrink:0; touch-action:none; user-select:none; }
+  .knob-wrap svg{ width:100%; height:100%; transform:rotate(-90deg); }
+  .knob-value{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:20px; font-weight:800; pointer-events:none;
+  }
+  .knob-handle{
+    position:absolute; width:12px; height:12px; border-radius:50%;
+    background:#fff; box-shadow:0 0 0 3px rgba(0,0,0,.35), 0 2px 6px rgba(0,0,0,.4);
+    pointer-events:none; transform:translate(-50%,-50%);
+  }
+
+  /* ---------- CTA ---------- */
+  .cta-area{ margin-top:auto; padding-top:24px; flex-shrink:0; }
+  .btn{
+    width:100%; padding:17px 22px; border:none; border-radius:99px;
+    font-size:15.5px; font-weight:800; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    transition:transform .16s var(--ease), box-shadow .2s, opacity .2s;
+  }
+  .btn-primary{
+    background:linear-gradient(135deg, var(--accent), #e46f1e);
+    color:#1a1206;
+    box-shadow:0 14px 30px -14px rgba(255,138,52,.65);
+  }
+  .btn-primary:active{ transform:scale(.98); }
+  .btn-primary:disabled{ opacity:.4; cursor:not-allowed; box-shadow:none; }
+  .btn-primary svg{ width:18px; height:18px; }
+  .btn-ghost{
+    background:transparent; color:var(--text-faint); font-weight:700; font-size:13px;
+    padding:10px; margin-top:10px;
+  }
+
+  /* ---------- final loading ---------- */
+  .loading-stage{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; gap:26px;
+  }
+  .orbit{ position:relative; width:120px; height:120px; }
+  .orbit svg{ width:100%; height:100%; }
+  .orbit-ring{ animation:spin 2.4s linear infinite; transform-origin:center; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .orbit-core{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  }
+  .orbit-core svg{ width:34px; height:34px; }
+  .loading-title{ font-size:19px; font-weight:800; }
+  .loading-sub{ font-size:13.5px; color:var(--text-dim); max-width:32ch; line-height:1.8; }
+  .loading-dots{ display:flex; gap:6px; }
+  .loading-dots span{
+    width:7px; height:7px; border-radius:99px; background:var(--accent);
+    animation:dotPulse 1.4s ease-in-out infinite;
+  }
+  .loading-dots span:nth-child(2){ animation-delay:.18s; }
+  .loading-dots span:nth-child(3){ animation-delay:.36s; }
+  @keyframes dotPulse{ 0%,80%,100%{ opacity:.25; transform:scale(.8); } 40%{ opacity:1; transform:scale(1); } }
+
+  .plan-note{
+    padding:13px 16px; border-radius:var(--radius-sm); margin-bottom:16px;
+    background:var(--accent-soft); border:1px solid rgba(255,138,52,.3);
+    font-size:12.5px; color:var(--accent-2); line-height:1.8;
+  }
+  .plan-list{ display:flex; flex-direction:column; gap:10px; }
+  .plan-row{
+    padding:15px 16px; border-radius:var(--radius-md);
+    background:var(--surface); border:1.5px solid var(--border);
+  }
+  .plan-row-top{ display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+  .plan-subject{ font-size:11px; font-weight:800; color:var(--accent-2); background:var(--surface-3); padding:3px 10px; border-radius:99px; }
+  .plan-minutes{ font-size:11.5px; color:var(--text-faint); font-weight:700; }
+  .plan-title{ font-size:14px; font-weight:700; line-height:1.7; margin-bottom:4px; }
+  .plan-tag{ font-size:11px; color:var(--text-faint); }
+
+  @media (max-width:380px){
+    h1{ font-size:22px; }
+    .choice-grid.cols-3{ gap:8px; }
+    .choice-card{ padding:16px 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <div class="brandbar">
+    <div class="brand-mark">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M4 12c2-5 6-8 8-8s6 3 8 8-6 8-8 8-6-3-8-8Z" stroke="#1a1206" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.4" fill="#1a1206"/></svg>
+    </div>
+    <div class="brand-name">کادوما</div>
+  </div>
+
+  <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+  <div class="progress-caption" id="progressCaption"></div>
+
+  <div class="stage-wrap" id="stageWrap"></div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* =========================================================
+     داده‌ی فصل‌ها — دقیقاً از داده‌ی خودِ انجین کادوما گرفته شده
+     (kie/data/biology10-12.js, chemistry10-12.js, physics10-12.js)
+     ========================================================= */
+  var CHAPTERS = {
+    biology: {
+      label: "زیست",
+      10: ["دنیای زنده","گوارش و جذب مواد","تبادلات گازی","گردش مواد در بدن","تنظیم اسمزی و دفع مواد زائد","از یاخته تا گیاه","جذب و انتقال مواد در گیاهان"],
+      11: ["تنظیم عصبی","حواس","دستگاه حرکتی","تنظیم شیمیایی","ایمنی","تقسیم یاخته","تولید مثل","تولید مثل نهاندانگان","پاسخ گیاهان به محرک‌ها"],
+      12: ["مولکول‌های اطلاعاتی","جریان اطلاعات در یاخته","تنظیم بیان ژن","انتقال اطلاعات در نسل‌ها","تغییر در اطلاعات وراثتی","از ماده به انرژی","از انرژی به ماده","فناوری‌های نوین زیستی","رفتارهای جانوران"]
+    },
+    chemistry: {
+      label: "شیمی",
+      10: ["کیهان زادگاه عناصر","ردّ پای گازها در زندگی","آب، آهنگ زندگی"],
+      11: ["قدر هدایای زمینی را بدانیم","در پی غذای سالم","پوشاک، نیازی پایان‌ناپذیر"],
+      12: ["مولکول‌ها در خدمت تندرستی","آسایش و رفاه در سایه‌ی شیمی","شیمی، جلوه‌ای از هنر، زیبایی و ماندگاری","شیمی، راهی به سوی آینده‌ی روشن‌تر"]
+    },
+    physics: {
+      label: "فیزیک",
+      10: ["فیزیک و اندازه‌گیری","ویژگی‌های فیزیکی مواد","کار، انرژی و توان","دما و گرما"],
+      11: ["الکتریسیته ساکن","جریان الکتریکی و مدارهای جریان مستقیم","مغناطیس و القای الکترومغناطیسی"],
+      12: ["حرکت بر خط راست","دینامیک","نوسان و امواج","آشنایی با فیزیک اتمی و هسته‌ای"]
+    }
+  };
+  var SUBJECT_ORDER = ["biology","chemistry","physics"];
+  var GRADES = [10,11,12];
+
+  var ICONS = {
+    check: '<svg viewBox="0 0 24 24" fill="none"><path d="M5 12.5 10 17 19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    arrow: '<svg viewBox="0 0 24 24" fill="none"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    face:  '<svg viewBox="0 0 24 24" fill="none"><path d="M4 12c2-5 6-8 8-8s6 3 8 8-6 8-8 8-6-3-8-8Z" stroke="#ff8a34" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.2" fill="#ff8a34"/></svg>',
+    book:  '<svg viewBox="0 0 24 24" fill="none"><path d="M4 5.5C4 4.7 4.7 4 5.5 4H12v16H5.5A1.5 1.5 0 0 1 4 18.5v-13Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M20 5.5c0-.8-.7-1.5-1.5-1.5H12v16h6.5a1.5 1.5 0 0 0 1.5-1.5v-13Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.7"/><path d="M12 7.5V12l3 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    target:'<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="4.5" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></svg>'
+  };
+
+  /* =========================================================
+     state
+     ========================================================= */
+  var state = {
+    name: "",
+    grade: null,
+    track: "experimental",
+    from: "16:00",
+    to: "20:30",
+    goal: null,
+    subjects: {}
+  };
+  SUBJECT_ORDER.forEach(function(s){
+    state.subjects[s] = { chapters: {}, mastery: {} };
+    GRADES.forEach(function(g){
+      CHAPTERS[s][g].forEach(function(title, i){
+        state.subjects[s].chapters[g + "-" + i] = false;
+      });
+    });
+  });
+
+  /* build the flat step list: fixed intro steps + a subject loop of 3 steps each */
+  var steps = ["welcome","name","grade","track","hours","goal"];
+  SUBJECT_ORDER.forEach(function(s){
+    steps.push("intro:" + s, "chapters:" + s, "mastery:" + s);
+  });
+  steps.push("loading", "result");
+
+  var cur = 0;
+  var wrap = document.getElementById("stageWrap");
+  var progressFill = document.getElementById("progressFill");
+  var progressCaption = document.getElementById("progressCaption");
+
+  function subjectFirstName(){ return state.name ? state.name : "رفیق"; }
+
+  function selectedChapterKeys(subject){
+    var out = [];
+    GRADES.forEach(function(g){
+      CHAPTERS[subject][g].forEach(function(title, i){
+        var key = g + "-" + i;
+        if (state.subjects[subject].chapters[key]) out.push({ grade:g, idx:i, num:i+1, title:title, key:key });
+      });
+    });
+    return out;
+  }
+
+  /* =========================================================
+     render
+     ========================================================= */
+  function render(){
+    var name = steps[cur];
+    var type = name.split(":")[0];
+    var arg = name.split(":")[1];
+
+    progressFill.style.width = Math.round((cur / (steps.length - 1)) * 100) + "%";
+    progressCaption.textContent = captionFor(type, arg);
+
+    var el = document.createElement("div");
+    el.className = "step";
+
+    switch(type){
+      case "welcome": el.innerHTML = viewWelcome(); break;
+      case "name": el.innerHTML = viewName(); break;
+      case "grade": el.innerHTML = viewGrade(); break;
+      case "track": el.innerHTML = viewTrack(); break;
+      case "hours": el.innerHTML = viewHours(); break;
+      case "goal": el.innerHTML = viewGoal(); break;
+      case "intro": el.innerHTML = viewSubjectIntro(arg); break;
+      case "chapters": el.innerHTML = viewChapters(arg); break;
+      case "mastery": el.innerHTML = viewMastery(arg); break;
+      case "loading": el.innerHTML = viewLoading(); break;
+      case "result": el.innerHTML = viewResult(); break;
+    }
+
+    wrap.innerHTML = "";
+    wrap.appendChild(el);
+    wireStep(type, arg, el);
+  }
+
+  function captionFor(type, arg){
+    if (type === "welcome" || type === "loading") return "";
+    var map = {
+      name:"معرفی سریع", grade:"معرفی سریع", track:"معرفی سریع",
+      hours:"معرفی سریع", goal:"هدف‌گذاری"
+    };
+    if (type === "intro" || type === "chapters" || type === "mastery"){
+      return "درس " + CHAPTERS[arg].label;
+    }
+    return map[type] || "";
+  }
+
+  function goTo(nextIndex){
+    var wrapEl = wrap.querySelector(".step");
+    if (wrapEl){
+      wrapEl.classList.add("leaving");
+      setTimeout(function(){ cur = nextIndex; render(); }, 220);
+    } else {
+      cur = nextIndex; render();
+    }
+  }
+  function next(){ goTo(Math.min(cur + 1, steps.length - 1)); }
+
+  /* =========================================================
+     views
+     ========================================================= */
+  function viewWelcome(){
+    return ''
+    + '<div style="flex:1; display:flex; flex-direction:column; justify-content:center;">'
+    +   '<div class="kadoma-face">' + ICONS.face + '</div>'
+    +   '<div class="eyebrow"><span class="dot"></span>خوش اومدی</div>'
+    +   '<h1>سلام، من <span class="hi">کادوما</span>م :)</h1>'
+    +   '<p class="lede">یه برنامه که هدفش یاد گرفتن خودِ خودته. نه یه اپ برنامه‌ریزی خشک — یه همراه که باهات پیش می‌ره.</p>'
+    +   '<div class="cta-area">'
+    +     '<button class="btn btn-primary" id="btnStart">بریم' + ICONS.arrow + '</button>'
+    +   '</div>'
+    + '</div>';
+  }
+
+  function viewName(){
+    return ''
+    + '<div class="eyebrow"><span class="dot"></span>قدم اول</div>'
+    + '<h1>اسمت چیه؟</h1>'
+    + '<p class="lede">فقط می‌خوام بدونم چی صدات کنم.</p>'
+    + '<div class="field">'
+    +   '<input class="text-input" id="nameInput" placeholder="مثلاً آرمین" value="' + escapeHtml(state.name) + '" autofocus>'
+    + '</div>'
+    + '<div class="cta-area">'
+    +   '<button class="btn btn-primary" id="btnNext" disabled>خوش اومدی' + ICONS.arrow + '</button>'
+    + '</div>';
+  }
+
+  function viewGrade(){
+    var cards = GRADES.map(function(g){
+      var sel = state.grade === g ? " selected" : "";
+      return '<div class="choice-card' + sel + '" data-grade="' + g + '">'
+        + '<div class="check-dot">' + ICONS.check + '</div>'
+        + '<div class="big">' + toFaDigits(g) + '</div>'
+        + '<div class="small">پایه</div>'
+      + '</div>';
+    }).join("");
+    return ''
+    + '<div class="eyebrow"><span class="dot"></span>' + escapeHtml(subjectFirstName()) + ' جان</div>'
+    + '<h1>چه پایه‌ای هستی؟</h1>'
+    + '<p class="lede">تا فصل‌ها رو دقیقاً مطابق کتاب‌های همون پایه بهت نشون بدم.</p>'
+    + '<div class="choice-grid cols-3">' + cards + '</div>'
+    + '<div class="cta-area">'
+    +   '<button class="btn btn-primary" id="btnNext" disabled>ادامه' + ICONS.arrow + '</button>'
+    + '</div>';
+  }
+
+  function viewTrack(){
+    var tracks = [
+      { key:"experimental", label:"تجربی", soon:false },
+      { key:"math", label:"ریاضی", soon:true },
+      { key:"humanities", label:"انسانی", soon:true }
+    ];
+    var cards = tracks.map(function(t){
+      var sel = state.track === t.key ? " selected" : "";
+      var dis = t.soon ? " disabled" : "";
+      return '<div class="choice-card' + sel + dis + '" data-track="' + t.key + '" data-soon="' + t.soon + '">'
+        + (t.soon ? '<div class="badge">به‌زودی</div>' : '<div class="check-dot">' + ICONS.check + '</div>')
+        + '<div class="big" style="font-size:15px;">' + t.label + '</div>'
+      + '</div>';
+    }).join("");
+    return ''
+    + '<div class="eyebrow"><span class="dot"></span>پایه‌ی ' + toFaDigits(state.grade) + '</div>'
+    + '<h1>و رشتت؟</h1>'
+    + '<p class="lede">فعلاً فقط تجربی رو کامل پشتیبانی می‌کنیم؛ ریاضی و انسانی به‌زودی اضافه می‌شن.</p>'
+    + '<div class="choice-grid cols-3">' + cards + '</div>'
+    + '<div class="cta-area">'
+    +   '<button class="btn btn-primary" id="btnNext">ادامه' + ICONS.arrow + '</button>'
+    + '</div>';
+  }
+
+  function viewHours(){
+    return ''
+    + '<div class="eyebrow"><span class="dot"></span>' + ICONS_INLINE(ICONS.clock) + 'ریتم روزت</div>'
+    + '<h1>بازه‌ی درس خوندنت رو می‌گی بهم؟</h1>'
+    + '<p class="lede">همون ساعت‌هایی که معمولاً واسه درس خوندن کنار می‌ذاری.</p>'
+    + '<div class="time-row">'
+    +   '<div class="time-field"><label>از</label><input type="time" class="time-input" id="fromInput" value="' + state.from + '"></div>'
+    +   '<div class="time-field"><label>تا</label><input type="time" class="time-input" id="toInput" value="' + state.to + '"></div>'
+    + '</div>'
+    + '<div class="cta-area">'
+    +   '<button class="btn btn-primary" id="btnNext">ادامه' + ICONS.arrow + '</button>'
+    + '</div>';
+  }
+
+  function viewGoal(){
+    return ''
+    + '<div class="eyebrow"><span class="dot"></span>' + ICONS_INLINE(ICONS.target) + 'یه قدم مونده</div>'
+    + '<h1>هدفت چیه؟</h1>'
+    + '<p class="lede">این تعیین می‌کنه چطور برات برنامه می‌چینم.</p>'
+    + '<div class="goal-stack">'
+    +   goalCard("mock", "آزمون‌های آزمایشی", true)
+    +   goalCard("finals", "امتحانات نهایی", true)
+    +   goalCard("custom", "خودم انتخاب می‌کنم", false)
+    + '</div>'
+    + '<div class="cta-area" style="padding-top:16px;">'
+    +   '<button class="btn btn-primary" id="btnNext" disabled>ادامه' + ICONS.arrow + '</button>'
+    + '</div>';
+  }
+  function goalCard(key, label, soon){
+    return '<div class="goal-card' + (soon ? ' disabled' : '') + '" data-goal="' + key + '">'
+      + '<div class="label">' + label + '</div>'
+      + (soon ? '<div class="soon">به‌زودی</div>' : '<div class="arrow">' + ICONS.arrow + '</div>')
+    + '</div>';
+  }
+
+  function viewSubjectIntro(subject){
+    var idx = SUBJECT_ORDER.indexOf(subject);
+    var lines = {
+      biology: 'بیا اول با <b style="color:var(--accent-2)">زیست</b> شروع کنیم.',
+      chemistry: 'خب، حالا نوبت <b style="color:var(--accent-2)">شیمیه</b>.',
+      physics: 'و آخرین درس: <b style="color:var(--accent-2)">فیزیک</b>.'
+    };
+    return ''
+    + '<div style="flex:1; display:flex; flex-direction:column; justify-content:center;">'
+    +   '<div class="kadoma-face">' + ICONS.book + '</div>'
+    +   '<div class="eyebrow"><span class="dot"></span>' + (idx+1) + ' از ۳ درس</div>'
+    +   '<h1>' + lines[subject] + '</h1>'
+    +   '<p class="lede">کدوم درسا رو می‌خوای بخونی؟</p>'
+    +   '<div class="cta-area"><button class="btn btn-primary" id="btnNext">بریم' + ICONS.arrow + '</button></div>'
+    + '</div>';
+  }
+
+  function viewChapters(subject){
+    var blocks = GRADES.map(function(g){
+      var rows = CHAPTERS[subject][g].map(function(title, i){
+        var key = g + "-" + i;
+        var checked = state.subjects[subject].chapters[key];
+        return '<div class="chapter-row' + (checked ? " checked" : "") + '" data-key="' + key + '" data-subject="' + subject + '">'
+          + '<div class="chapter-box">' + ICONS.check + '</div>'
+          + '<div class="chapter-text"><span class="num">فصل ' + toFaDigits(i+1) + '</span> — ' + escapeHtml(title) + '</div>'
+        + '</div>';
+      }).join("");
+      return '<div class="grade-block">'
+        + '<div class="grade-block-head"><div class="grade-pill">پایه‌ی ' + gradeLabel(g) + '</div><div class="count">' + toFaDigits(CHAPTERS[subject][g].length) + ' فصل</div></div>'
+        + '<div class="chapter-list">' + rows + '</div>'
+      + '</div>';
+    }).join("");
+    return ''
+    + '<div class="eyebrow"><span class="dot"></span>درس ' + CHAPTERS[subject].label + '</div>'
+    + '<h1>کدوم فصل‌ها رو می‌خوای بخونی؟</h1>'
+    + '<p class="lede">هر فصلی که می‌خوای توی برنامه‌ت باشه رو تیک بزن.</p>'
+    + blocks
+    + '<div class="cta-area">'
+    +   '<button class="btn btn-primary" id="btnNext">انجام شد!' + ICONS.check + '</button>'
+    + '</div>';
+  }
+
+  function viewMastery(subject){
+    var chosen = selectedChapterKeys(subject);
+    var rows = chosen.map(function(c){
+      var val = state.subjects[subject].mastery[c.key] || 5;
+      return '<div class="mastery-row">'
+        + '<div class="mastery-info">'
+        +   '<div class="title"><span class="num">فصل ' + toFaDigits(c.num) + '</span>(' + escapeHtml(CHAPTERS[subject].label) + '، ' + escapeHtml(c.title) + ')</div>'
+        +   '<div class="hint">تسلطت رو دور دایره بکش</div>'
+        + '</div>'
+        + knobHtml(subject, c.key, val)
+      + '</div>';
+    }).join("");
+
+    if (chosen.length === 0){
+      rows = '<p class="lede">فصلی برای این درس انتخاب نکردی — می‌تونی رد بشی.</p>';
+    }
+
+    return ''
+    + '<div class="eyebrow"><span class="dot"></span>درس ' + CHAPTERS[subject].label + '</div>'
+    + '<h1>' + escapeHtml(subjectFirstName()) + ' جان، تسلطت از ۱ تا ۱۰ چقدره توی این درسا؟</h1>'
+    + '<p class="lede">دایره‌ی وسط رو بکش؛ هرچی بیشتر بری سمت سبز، یعنی مسلط‌تری.</p>'
+    + '<div class="mastery-list">' + rows + '</div>'
+    + '<div class="cta-area">'
+    +   '<button class="btn btn-primary" id="btnNext">ادامه' + ICONS.arrow + '</button>'
+    + '</div>';
+  }
+
+  function knobHtml(subject, key, val){
+    return '<div class="knob-wrap" data-subject="' + subject + '" data-key="' + key + '">'
+      + '<svg viewBox="0 0 78 78">'
+      +   '<circle cx="39" cy="39" r="32" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="7"/>'
+      +   '<circle class="knob-arc" cx="39" cy="39" r="32" fill="none" stroke="' + knobColor(val) + '" stroke-width="7" stroke-linecap="round" stroke-dasharray="' + (val/10*201.06).toFixed(1) + ' 201.06"/>'
+      + '</svg>'
+      + '<div class="knob-value" style="color:' + knobColor(val) + '">' + toFaDigits(val) + '</div>'
+      + '<div class="knob-handle" style="' + handlePos(val) + ' background:' + knobColor(val) + ';"></div>'
+    + '</div>';
+  }
+  function knobColor(val){
+    var t = (val - 1) / 9;
+    var c1 = [59,130,246], c2 = [34,197,94];
+    var r = Math.round(c1[0] + (c2[0]-c1[0])*t);
+    var g = Math.round(c1[1] + (c2[1]-c1[1])*t);
+    var b = Math.round(c1[2] + (c2[2]-c1[2])*t);
+    return "rgb(" + r + "," + g + "," + b + ")";
+  }
+  function handlePos(val){
+    var angle = (val/10) * 360 - 90;
+    var rad = angle * Math.PI / 180;
+    var cx = 39 + 32 * Math.cos(rad);
+    var cy = 39 + 32 * Math.sin(rad);
+    var pct_x = (cx/78*100).toFixed(2), pct_y = (cy/78*100).toFixed(2);
+    return "top:" + pct_y + "%; left:" + pct_x + "%;";
+  }
+
+  function viewLoading(){
+    return ''
+    + '<div class="loading-stage">'
+    +   '<div class="orbit">'
+    +     '<svg viewBox="0 0 120 120" class="orbit-ring"><circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="6"/><circle cx="60" cy="60" r="52" fill="none" stroke="#ff8a34" stroke-width="6" stroke-linecap="round" stroke-dasharray="90 236.7"/></svg>'
+    +     '<div class="orbit-core">' + ICONS.face + '</div>'
+    +   '</div>'
+    +   '<div><div class="loading-title">برنامه‌ات داره آماده می‌شه</div></div>'
+    +   '<div class="loading-sub">یکم صبر کن... دارم فصل‌ها و تسلطت رو کنار هم می‌چینم تا اولین برنامه‌ت آماده بشه.</div>'
+    +   '<div class="loading-dots"><span></span><span></span><span></span></div>'
+    + '</div>';
+  }
+
+  var planResult = null;
+  var planError = null;
+
+  function runGeneration(){
+    var startedAt = Date.now();
+    function proceed(){
+      var elapsed = Date.now() - startedAt;
+      var wait = Math.max(0, 1400 - elapsed); // keep the loader visible a minimum, natural amount of time
+      setTimeout(next, wait);
+    }
+    function run(){
+      if (!window.KadomaBridge){ setTimeout(run, 60); return; }
+      window.KadomaBridge.generatePlan(state).then(function(res){
+        planResult = res; planError = null; proceed();
+      }).catch(function(err){
+        planError = err; planResult = null;
+        console.error("Kadoma plan generation failed:", err);
+        proceed();
+      });
+    }
+    run();
+  }
+
+  function viewResult(){
+    if (planError){
+      return ''
+      + '<div style="flex:1; display:flex; flex-direction:column; justify-content:center; text-align:center;">'
+      +   '<h1>یه مشکل کوچیک پیش اومد</h1>'
+      +   '<p class="lede">برنامه‌ساز موقتاً جواب نداد. دوباره امتحان کن.</p>'
+      + '</div>';
+    }
+    var draft = planResult.draft;
+    var specs = draft.commitmentSpecs || [];
+    var hours = Math.floor(draft.capacityMinutes / 60), mins = draft.capacityMinutes % 60;
+
+    var rows = specs.map(function(c){
+      var energyTag = c.metadata && c.metadata.energyWindow === "high" ? "بازه‌ی پرانرژی" : "بازه‌ی سبک‌تر";
+      return '<div class="plan-row">'
+        + '<div class="plan-row-top">'
+        +   '<span class="plan-subject">' + escapeHtml(c.subject || "") + '</span>'
+        +   '<span class="plan-minutes">' + toFaDigits(c.plannedMinutes) + ' دقیقه</span>'
+        + '</div>'
+        + '<div class="plan-title">' + escapeHtml(c.title) + '</div>'
+        + '<div class="plan-tag">' + energyTag + '</div>'
+      + '</div>';
+    }).join("") || '<p class="lede">چیزی برای امروز پیدا نشد — احتمالاً فصل‌های انتخابیت خیلی کم بودن.</p>';
+
+    var negotiationNote = draft.negotiationProposal
+      ? '<div class="plan-note">' + escapeHtml((draft.negotiationProposal.message && draft.negotiationProposal.message()) || "امروز حجم برنامه از زمان آزادت بیشتر بود، یه‌کم سبک‌ترش کردم.") + '</div>'
+      : "";
+
+    return ''
+    + '<div class="eyebrow"><span class="dot"></span>برنامه‌ی امروز</div>'
+    + '<h1>' + escapeHtml(subjectFirstName()) + ' جان، این برنامه‌ی امروزته</h1>'
+    + '<p class="lede">با ظرفیت واقعی ' + toFaDigits(hours) + ' ساعت و ' + toFaDigits(mins) + ' دقیقه‌ی امروزت هماهنگ شده.</p>'
+    + negotiationNote
+    + '<div class="plan-list">' + rows + '</div>'
+    + '<div class="cta-area"><button class="btn btn-primary" id="btnDone">شروع می‌کنم' + ICONS.check + '</button></div>';
+  } 
+  function ICONS_INLINE(svg){ return '<span style="display:inline-flex; width:13px; height:13px; color:var(--accent-2); margin-left:5px;">' + svg + '</span>'; }
+
+  /* =========================================================
+     wiring per step
+     ========================================================= */
+  function wireStep(type, arg, el){
+    if (type === "welcome"){
+      el.querySelector("#btnStart").addEventListener("click", next);
+    }
+    if (type === "name"){
+      var input = el.querySelector("#nameInput");
+      var btn = el.querySelector("#btnNext");
+      function sync(){
+        state.name = input.value.trim();
+        btn.disabled = state.name.length === 0;
+        btn.innerHTML = state.name ? ("خوش اومدی " + escapeHtml(state.name) + " " + ICONS.arrow) : ("خوش اومدی" + ICONS.arrow);
+      }
+      input.addEventListener("input", sync);
+      sync();
+      btn.addEventListener("click", next);
+    }
+    if (type === "grade"){
+      var cards = el.querySelectorAll(".choice-card");
+      var btn = el.querySelector("#btnNext");
+      cards.forEach(function(c){
+        c.addEventListener("click", function(){
+          state.grade = parseInt(c.dataset.grade, 10);
+          cards.forEach(function(x){ x.classList.remove("selected"); });
+          c.classList.add("selected");
+          btn.disabled = false;
+        });
+      });
+      btn.addEventListener("click", next);
+    }
+    if (type === "track"){
+      var cards = el.querySelectorAll(".choice-card");
+      cards.forEach(function(c){
+        if (c.dataset.soon === "true") return;
+        c.addEventListener("click", function(){
+          state.track = c.dataset.track;
+          cards.forEach(function(x){ x.classList.remove("selected"); });
+          c.classList.add("selected");
+        });
+      });
+      el.querySelector("#btnNext").addEventListener("click", next);
+    }
+    if (type === "hours"){
+      el.querySelector("#fromInput").addEventListener("change", function(e){ state.from = e.target.value; });
+      el.querySelector("#toInput").addEventListener("change", function(e){ state.to = e.target.value; });
+      el.querySelector("#btnNext").addEventListener("click", next);
+    }
+    if (type === "goal"){
+      var custom = el.querySelector('[data-goal="custom"]');
+      var btn = el.querySelector("#btnNext");
+      custom.addEventListener("click", function(){
+        state.goal = "custom";
+        el.querySelectorAll(".goal-card").forEach(function(x){ x.style.borderColor = "var(--border)"; });
+        custom.style.borderColor = "var(--accent)";
+        btn.disabled = false;
+      });
+      btn.addEventListener("click", next);
+    }
+    if (type === "intro"){
+      el.querySelector("#btnNext").addEventListener("click", next);
+    }
+    if (type === "chapters"){
+      el.querySelectorAll(".chapter-row").forEach(function(row){
+        row.addEventListener("click", function(){
+          var key = row.dataset.key, subj = row.dataset.subject;
+          state.subjects[subj].chapters[key] = !state.subjects[subj].chapters[key];
+          row.classList.toggle("checked");
+        });
+      });
+      el.querySelector("#btnNext").addEventListener("click", next);
+    }
+    if (type === "mastery"){
+      el.querySelectorAll(".knob-wrap").forEach(function(knob){
+        wireKnob(knob);
+      });
+      el.querySelector("#btnNext").addEventListener("click", next);
+    }
+    if (type === "loading"){
+      runGeneration();
+    }
+    if (type === "result"){
+      var doneBtn = el.querySelector("#btnDone");
+      if (doneBtn){
+        doneBtn.addEventListener("click", function(){
+          doneBtn.disabled = true;
+          doneBtn.innerHTML = "ثبت شد" + ICONS.check;
+        });
+      }
+    }
+  }
+
+  function wireKnob(knob){
+    var subject = knob.dataset.subject, key = knob.dataset.key;
+    var dragging = false;
+
+    function angleToVal(clientX, clientY){
+      var rect = knob.getBoundingClientRect();
+      var cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+      var dx = clientX - cx, dy = clientY - cy;
+      var angle = Math.atan2(dy, dx) * 180/Math.PI + 90;
+      if (angle < 0) angle += 360;
+      var val = Math.round((angle/360) * 10);
+      if (val < 1) val = 1;
+      if (val > 10) val = 10;
+      return val;
+    }
+    function apply(val){
+      state.subjects[subject].mastery[key] = val;
+      var arc = knob.querySelector(".knob-arc");
+      var valEl = knob.querySelector(".knob-value");
+      var handle = knob.querySelector(".knob-handle");
+      var color = knobColor(val);
+      arc.setAttribute("stroke-dasharray", (val/10*201.06).toFixed(1) + " 201.06");
+      arc.setAttribute("stroke", color);
+      valEl.style.color = color;
+      valEl.textContent = toFaDigits(val);
+      handle.setAttribute("style", handlePos(val) + "background:" + color + ";");
+    }
+    function onMove(e){
+      if (!dragging) return;
+      var p = (e.touches && e.touches[0]) ? e.touches[0] : e;
+      apply(angleToVal(p.clientX, p.clientY));
+    }
+    knob.addEventListener("pointerdown", function(e){
+      dragging = true;
+      apply(angleToVal(e.clientX, e.clientY));
+      knob.setPointerCapture && knob.setPointerCapture(e.pointerId);
+    });
+    knob.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", function(){ dragging = false; });
+  }
+
+  /* =========================================================
+     helpers
+     ========================================================= */
+  var FA_DIGITS = ["۰","۱","۲","۳","۴","۵","۶","۷","۸","۹"];
+  function toFaDigits(n){ return String(n).split("").map(function(ch){ return /[0-9]/.test(ch) ? FA_DIGITS[+ch] : ch; }).join(""); }
+  function gradeLabel(g){ return g===10 ? "دهم" : g===11 ? "یازدهم" : "دوازدهم"; }
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+  render();
+})();
+</script>
+<script type="module">
+  import { KadomaIntelligenceEngine } from './kie/kadomaEngine.js';
+  import { attachLivingPlan } from './kie/extensions/livingPlanExtension.js';
+  import { attachStage2 } from './kie/extensions/stage2Extension.js';
+  import { attachStage3 } from './kie/extensions/stage3Extension.js';
+  import { attachStage4 } from './kie/extensions/stage4Extension.js';
+  import { attachKnowledgeBase } from './kie/data/index.js';
+
+  var PREFIX = { biology: "zist", chemistry: "chem", physics: "phys" };
+  var SUBJECT_NAME = {
+    biology:   { 10: "زیست‌شناسی (پایه دهم)", 11: "زیست‌شناسی (پایه یازدهم)", 12: "زیست‌شناسی (پایه دوازدهم)" },
+    chemistry: { 10: "شیمی (پایه دهم)", 11: "شیمی (پایه یازدهم)", 12: "شیمی (پایه دوازدهم)" },
+    physics:   { 10: "فیزیک (پایه دهم)", 11: "فیزیک (پایه یازدهم)", 12: "فیزیک (پایه دوازدهم)" }
+  };
+
+  function diffMinutes(from, to){
+    var a = from.split(":").map(Number), b = to.split(":").map(Number);
+    var startM = a[0]*60 + a[1], endM = b[0]*60 + b[1];
+    var diff = endM - startM;
+    if (diff <= 0) diff += 24*60; // study window crosses midnight
+    return diff;
+  }
+
+  /**
+   * Turns the onboarding `state` object into a real committed daily plan.
+   * This is the orchestrator glue Stage 2 was for: it does not reimplement
+   * any planning logic - it only maps onboarding answers onto the exact
+   * Stage 1-4 API surface (attachLivingPlan/2/3/4 + attachKnowledgeBase)
+   * that already existed in the engine before this file was touched.
+   */
+  async function generatePlan(state){
+    var kie = new KadomaIntelligenceEngine();
+    var livingPlan = attachLivingPlan(kie, {
+      goal: "کنکور تجربی — پایه‌ی " + state.grade,
+      grade: state.grade,
+      track: state.track
+    });
+    attachStage2(livingPlan);
+    var stage3 = attachStage3(livingPlan);
+    var kb = attachKnowledgeBase(stage3); // ingests all 46 chapters (bio/chem/physics × 10/11/12)
+    var stage4 = attachStage4(livingPlan, stage3);
+
+    // Every ingested chapter starts at mastery 10 ("already known / not needed")
+    // so CurriculumEngine's priority formula naturally pushes it near zero;
+    // then we overwrite ONLY the chapters + ratings the user actually chose.
+    // This restricts today's plan to the user's real selection without
+    // touching CurriculumEngine.js/ChapterMastery.js themselves.
+    kb.ingestedChapterIds.forEach(function(id){ stage3.chapterMastery.setScore(id, 10); });
+
+    var activeSubjectNames = [];
+    ["biology","chemistry","physics"].forEach(function(subjKey){
+      [10,11,12].forEach(function(grade){
+        var chosenAny = false;
+        Object.keys(state.subjects[subjKey].chapters).forEach(function(key){
+          if (!state.subjects[subjKey].chapters[key]) return;
+          var parts = key.split("-");
+          var g = parseInt(parts[0], 10), idx = parseInt(parts[1], 10);
+          if (g !== grade) return;
+          var chapterId = PREFIX[subjKey] + grade + "-c" + (idx + 1);
+          var rating = state.subjects[subjKey].mastery[key] || 5;
+          stage3.chapterMastery.setScore(chapterId, rating);
+          chosenAny = true;
+        });
+        if (chosenAny) activeSubjectNames.push(SUBJECT_NAME[subjKey][grade]);
+      });
+    });
+
+    var freeTimeMinutes = diffMinutes(state.from, state.to);
+    var signals = { freeTimeMinutes: freeTimeMinutes, completionRate: 0.7, energy: 6, stress: 4, sleepHours: 7 };
+    var draft = stage4.generateDailyPlan(signals, {
+      subjects: activeSubjectNames.length ? activeSubjectNames : undefined,
+      maxChapters: 6,
+      maxSubjectsPerDay: Math.max(1, activeSubjectNames.length)
+    });
+    stage4.commitDailyPlan(draft);
+
+    return { livingPlan: livingPlan, draft: draft, freeTimeMinutes: freeTimeMinutes };
+  }
+
+  window.KadomaBridge = { generatePlan: generatePlan };
+  window.KadomaBridgeReady = true;
+</script>
+</body>
+</html>
